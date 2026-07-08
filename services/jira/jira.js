@@ -26,10 +26,10 @@ class JiraClient {
      * @param {string} issueKey - Ticket de Jira, ej: "CPG-78283"
      * @param {string|number} version - Versión del mapa extraida
      * @param {string} platform - Plataforma extraida (acc/wcc/command)
-     * @param {Array} errors - Array de strings con los hallazgos validados
+     * @param {Array} findings - Array de strings u objetos con los hallazgos validados (errores y warnings)
      * @returns {Object} Respuesta directa parseada de Jira
      */
-    postValidationError(issueKey, version, platform, errors) {
+    postValidationError(issueKey, version, platform, findings) {
         // Check for duplicate comment for the same version
         const urlGet = `${this.baseUrl}/issue/${issueKey.trim()}/comment`;
         const getOptions = {
@@ -70,10 +70,26 @@ class JiraClient {
             },
             {
                 type: "bulletList",
-                content: errors.map(err => {
-                    const textStr = (typeof err === 'string') ? err : (err.message || String(err));
+                content: findings.map(finding => {
+                    const type = (typeof finding === 'object' && finding !== null && finding.type) ? finding.type.toUpperCase() : "ERROR";
+                    const isWarning = type === "WARNING";
+                    const color = isWarning ? "#ff9900" : "#de350b";
+                    const prefix = `[${type}] `;
+
+                    const textStr = (typeof finding === 'string') ? finding : (finding.message || String(finding));
                     const lines = textStr.split('\n');
                     const paragraphContent = [];
+
+                    // Prepend the bold, colored prefix to the first line
+                    paragraphContent.push({
+                        type: "text",
+                        text: prefix,
+                        marks: [
+                            { type: "strong" },
+                            { type: "textColor", attrs: { color: color } }
+                        ]
+                    });
+
                     lines.forEach((line, index) => {
                         paragraphContent.push({ type: "text", text: line });
                         if (index < lines.length - 1) {
@@ -132,9 +148,10 @@ class JiraClient {
      * @param {string} issueKey - Ticket de Jira, ej: "CPG-78283"
      * @param {string|number} version - Versión del mapa extraida
      * @param {string} platform - Plataforma extraida (acc/wcc/command)
+     * @param {Array} warnings - Array de strings u objetos con los warnings validados
      * @returns {Object} Respuesta directa parseada de Jira
      */
-    postValidationSuccess(issueKey, version, platform) {
+    postValidationSuccess(issueKey, version, platform, warnings = []) {
         // Check for duplicate comment for the same version
         const urlGet = `${this.baseUrl}/issue/${issueKey.trim()}/comment`;
         const getOptions = {
@@ -174,6 +191,47 @@ class JiraClient {
                 ]
             }
         ];
+
+        if (warnings && warnings.length > 0) {
+            contentBlocks.push({
+                type: "paragraph",
+                content: [
+                    { type: "text", text: "However, the following warnings were found:", marks: [{ type: "em" }] }
+                ]
+            });
+            contentBlocks.push({
+                type: "bulletList",
+                content: warnings.map(warn => {
+                    const textStr = (typeof warn === 'string') ? warn : (warn.message || String(warn));
+                    const lines = textStr.split('\n');
+                    const paragraphContent = [];
+
+                    // Prepend [WARNING] prefix
+                    paragraphContent.push({
+                        type: "text",
+                        text: "[WARNING] ",
+                        marks: [
+                            { type: "strong" },
+                            { type: "textColor", attrs: { color: "#ff9900" } }
+                        ]
+                    });
+
+                    lines.forEach((line, index) => {
+                        paragraphContent.push({ type: "text", text: line });
+                        if (index < lines.length - 1) {
+                            paragraphContent.push({ type: "hardBreak" });
+                        }
+                    });
+
+                    return {
+                        type: "listItem",
+                        content: [
+                            { type: "paragraph", content: paragraphContent }
+                        ]
+                    };
+                })
+            });
+        }
 
         const payload = JSON.stringify({
             body: {

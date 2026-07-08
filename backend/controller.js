@@ -310,16 +310,24 @@ function processSingleTicket(key, version, platform, row, sheet, indices, creden
 
     // Conexión a Jira Feedback Automatizado
     const jira = new JiraClient(credentials);
-    if (!result.success && result.errors && result.errors.length > 0) {
+    if (!result.success) {
       try {
-        jira.postValidationError(key, version, platform, result.errors);
-        result.message += " | [Jira Error Posted]";
+        // Merge errors and warnings so both are posted and distinguished in Jira
+        const allFindings = [
+          ...(result.errors || []).map(e => ({ ...e, type: "error" })),
+          ...(result.warnings || []).map(w => ({ ...w, type: "warning" }))
+        ];
+        
+        if (allFindings.length > 0) {
+          jira.postValidationError(key, version, platform, allFindings);
+          result.message += " | [Jira Error Posted]";
+        }
       } catch (jiraError) {
         result.message += ` | [Jira Error Failed: ${jiraError.message}]`;
       }
     } else if (result.success) {
       try {
-        jira.postValidationSuccess(key, version, platform);
+        jira.postValidationSuccess(key, version, platform, result.warnings || []);
         result.message += " | [Jira Success Posted]";
       } catch (jiraError) {
         result.message += ` | [Jira Success Failed: ${jiraError.message}]`;
