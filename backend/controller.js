@@ -303,7 +303,12 @@ function processSingleTicket(key, version, platform, row, sheet, indices, creden
 
     // Autocompletar en Base de Datos de Google Sheets  
     const finalStatus = "QA_VTR_REVIEWED";
-    const finalAnswer = result.success ? "Passes" : "Fails";
+    let finalAnswer = "Passes";
+    if (result.errors && result.errors.length > 0) {
+      finalAnswer = "Fails";
+    } else if (result.warnings && result.warnings.length > 0) {
+      finalAnswer = "Warning";
+    }
 
     sheet.getRange(row, indices.status + 1).setValue(finalStatus);
     sheet.getRange(row, indices.answer + 1).setValue(finalAnswer);
