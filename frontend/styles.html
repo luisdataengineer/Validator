@@ -1,0 +1,43 @@
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'brand-blue': '#0F2C59',
+          'steel': '#475569',
+          'light': '#F8FAFC'
+        },
+        fontFamily: {
+          sans: ['Inter', 'sans-serif'],
+        }
+      }
+    }
+  }
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+  /* Console scrollbar styling */
+  #status-console::-webkit-scrollbar {
+    width: 6px;
+  }
+  #status-console::-webkit-scrollbar-track {
+    background: #0f172a; 
+  }
+  #status-console::-webkit-scrollbar-thumb {
+    background: #334155; 
+    border-radius: 4px;
+  }
+  #status-console::-webkit-scrollbar-thumb:hover {
+    background: #475569; 
+  }
+
+  /* Toggle Switch Custom Implementation */
+  .toggle-checkbox:checked {
+    right: 0;
+    border-color: #0F2C59;
+  }
+  .toggle-checkbox:checked + .toggle-label {
+    background-color: #0F2C59;
+  }
+</style>

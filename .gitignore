@@ -1,0 +1,11 @@
+# Dependencias y temporales
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# Configuración local de clasp (opcional: si no quieres compartir el Script ID de tu Google Apps Script)
+# .clasp.json
+
+# Credenciales globales de clasp (por si acaso se copian al proyecto)
+.clasprc.json

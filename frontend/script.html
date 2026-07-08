@@ -1,0 +1,318 @@
+<script>
+  function addLog(message, type = 'Info') {
+    const consoleDiv = document.getElementById('status-console');
+    const time = new Date().toLocaleTimeString();
+    
+    let colorClass = 'text-slate-300';
+    if (type === 'Error') colorClass = 'text-red-400';
+    if (type === 'Success') colorClass = 'text-emerald-400';
+    if (type === 'System') colorClass = 'text-blue-400';
+
+    const logEntry = document.createElement('div');
+    logEntry.className = `text-sm font-mono mb-1 ${colorClass}`;
+    logEntry.innerHTML = `<span class="text-slate-500">[${time}]</span> <span class="font-bold">[${type}]</span> <span class="text-slate-300">${message}</span>`;
+    
+    consoleDiv.appendChild(logEntry);
+    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+  }
+
+  function toggleLoading(show) {
+    const overlay = document.getElementById('loadingOverlay');
+    if (show) {
+      overlay.classList.remove('hidden');
+      overlay.classList.add('flex');
+    } else {
+      overlay.classList.add('hidden');
+      overlay.classList.remove('flex');
+    }
+  }
+
+  // --- Modals Logic ---
+  function openSettings() {
+    document.getElementById('settingsModal').classList.remove('hidden');
+    document.getElementById('settingsModal').classList.add('flex');
+    // Load existing from session
+    const creds = JSON.parse(sessionStorage.getItem('sessionCredentials') || '{}');
+    document.getElementById('ccEmail').value = creds.ccEmail || '';
+    document.getElementById('ccPassword').value = creds.ccPassword || '';
+    document.getElementById('commandTOTP').value = creds.commandTOTP || '';
+    document.getElementById('accTOTP').value = creds.accTOTP || '';
+    document.getElementById('jiraEmail').value = creds.jiraEmail || '';
+    document.getElementById('jiraToken').value = creds.jiraToken || '';
+  }
+
+  function closeSettings() {
+    document.getElementById('settingsModal').classList.add('hidden');
+    document.getElementById('settingsModal').classList.remove('flex');
+  }
+
+  function saveSettings() {
+    const creds = {
+      ccEmail: document.getElementById('ccEmail').value,
+      ccPassword: document.getElementById('ccPassword').value,
+      commandTOTP: document.getElementById('commandTOTP').value,
+      accTOTP: document.getElementById('accTOTP').value,
+      jiraEmail: document.getElementById('jiraEmail').value,
+      jiraToken: document.getElementById('jiraToken').value
+    };
+    
+    toggleLoading(true);
+    addLog('Verifying credentials and developer privileges...', 'System');
+
+    // Verify against actual APIs and whitelist before storing anything
+    google.script.run
+      .withSuccessHandler((verifyRes) => {
+        if (verifyRes.success) {
+          addLog(verifyRes.message, 'Success');
+          
+          // Save locally only after valid connection
+          sessionStorage.setItem('sessionCredentials', JSON.stringify(creds));
+          checkCredentialsState();
+          
+          // Sync to server for automated background triggers
+          google.script.run
+            .withSuccessHandler((res) => {
+              if (res.success) {
+                addLog('Settings synced with server for automation logs.', 'System');
+              } else {
+                addLog('Failed to sync settings with server: ' + res.message, 'Error');
+              }
+              toggleLoading(false);
+              closeSettings();
+            })
+            .saveCredentials(creds);
+            
+        } else {
+          toggleLoading(false);
+          addLog('Validation Rejected: ' + verifyRes.message, 'Error');
+          alert(verifyRes.message);
+        }
+      })
+      .withFailureHandler((error) => {
+        toggleLoading(false);
+        addLog('Server error during verification: ' + error.message, 'Error');
+      })
+      .verifyCredentials(creds);
+  }
+
+  function openFindings(responseObj) {
+    document.getElementById('findingsModal').classList.remove('hidden');
+    document.getElementById('findingsModal').classList.add('flex');
+    
+    const banner = document.getElementById('modalBanner');
+    const list = document.getElementById('findingsList');
+    list.innerHTML = '';
+    
+    if (responseObj.success) {
+      banner.className = "px-6 py-4 shadow-sm border-b font-medium text-sm bg-emerald-50 text-emerald-700 border-emerald-100";
+      banner.textContent = responseObj.message || "File validation passed successfully.";
+      
+      if (responseObj.warnings && Array.isArray(responseObj.warnings)) {
+        responseObj.warnings.forEach(warn => {
+          const li = document.createElement('li');
+          li.className = "bg-white p-3 rounded-lg border border-slate-200 text-sm font-mono text-slate-700 shadow-sm flex items-start gap-2";
+          li.innerHTML = `<span class="text-yellow-500 font-bold">!</span> <span class="whitespace-pre-line">${warn.message || warn}</span>`;
+          list.appendChild(li);
+        });
+      }
+    } else {
+      banner.className = "px-6 py-4 shadow-sm border-b font-medium text-sm bg-red-50 text-red-700 border-red-100";
+      banner.textContent = responseObj.message || "Validation failed with errors.";
+      
+      if (responseObj.warnings && Array.isArray(responseObj.warnings)) {
+        responseObj.warnings.forEach(warn => {
+          const li = document.createElement('li');
+          li.className = "bg-white p-3 rounded-lg border border-slate-200 text-sm font-mono text-slate-700 shadow-sm flex items-start gap-2";
+          li.innerHTML = `<span class="text-yellow-500 font-bold">!</span> <span class="whitespace-pre-line">${warn.message || warn}</span>`;
+          list.appendChild(li);
+        });
+      }
+      
+      if (responseObj.errors && Array.isArray(responseObj.errors)) {
+        responseObj.errors.forEach(err => {
+          const li = document.createElement('li');
+          li.className = "bg-white p-3 rounded-lg border border-slate-200 text-sm font-mono text-slate-700 shadow-sm flex items-start gap-2";
+          li.innerHTML = `<span class="text-red-500 font-bold">X</span> <span class="whitespace-pre-line">${err.message || err}</span>`;
+          list.appendChild(li);
+        });
+      }
+    }
+  }
+
+  function closeFindings() {
+    document.getElementById('findingsModal').classList.add('hidden');
+    document.getElementById('findingsModal').classList.remove('flex');
+  }
+
+  // Inject session credentials safely
+  function getSessionPayload(args = {}) {
+    // Inject the credentials object inside the args explicitly so the backend handles them safely.
+    const creds = JSON.parse(sessionStorage.getItem('sessionCredentials') || '{}');
+    return { ...args, credentials: creds };
+  }
+
+  // --- Validate Credentials State ---
+  function checkCredentialsState() {
+    const creds = JSON.parse(sessionStorage.getItem('sessionCredentials') || '{}');
+    const hasCommandCreds = !!(creds.ccEmail && creds.ccPassword && (creds.commandTOTP || creds.accTOTP));
+    const hasJiraCreds = !!(creds.jiraEmail && creds.jiraToken);
+    const hasCreds = hasCommandCreds && hasJiraCreds;
+
+    // Fetch from Command Center Button
+    const fetchCmdBtn = document.getElementById('fetchCommandBtn');
+    if (fetchCmdBtn) {
+      if (!hasCommandCreds) {
+        fetchCmdBtn.disabled = true;
+        fetchCmdBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        fetchCmdBtn.title = 'Please configure Command Center credentials in Session Settings.';
+      } else {
+        fetchCmdBtn.disabled = false;
+        fetchCmdBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        fetchCmdBtn.removeAttribute('title');
+      }
+    }
+
+    // Jira Ticket Sync Button
+    const fetchTktBtn = document.getElementById('fetchTicketBtn');
+    if (fetchTktBtn) {
+      if (!hasCreds) {
+        fetchTktBtn.disabled = true;
+        fetchTktBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        fetchTktBtn.title = 'Please configure both Jira and Command Center credentials in Session Settings.';
+      } else {
+        fetchTktBtn.disabled = false;
+        fetchTktBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        fetchTktBtn.removeAttribute('title');
+      }
+    }
+
+    // Automation Toggle
+    const autoToggle = document.getElementById('autoToggle');
+    if (autoToggle) {
+      if (!hasCreds) {
+        autoToggle.disabled = true;
+        autoToggle.checked = false;
+        // The parent span/label receives cursor-not-allowed visually
+        const toggleParent = autoToggle.parentElement;
+        if(toggleParent) toggleParent.classList.add('opacity-50', 'cursor-not-allowed');
+        autoToggle.title = 'Please configure all credentials to enable server automation features.';
+      } else {
+        autoToggle.disabled = false;
+        const toggleParent = autoToggle.parentElement;
+        if(toggleParent) toggleParent.classList.remove('opacity-50', 'cursor-not-allowed');
+        autoToggle.removeAttribute('title');
+      }
+    }
+  }
+
+  // --- GAS Execution ---
+  function executeGAS(functionName, args = {}, successMsg = 'Operation completed successfully.') {
+    toggleLoading(true);
+    addLog(`Executing ${functionName}...`, 'System');
+
+    const payload = getSessionPayload(args);
+
+    google.script.run
+      .withSuccessHandler((response) => {
+        toggleLoading(false);
+        // Handle the robust JSON response format
+        if (response && typeof response === 'object' && response !== null) {
+          if (response.success) {
+             addLog(response.message, 'Success');
+          } else {
+             addLog(response.message, 'Error');
+          }
+          openFindings(response);
+          return;
+        } else if (response) {
+          addLog(response, 'Info');
+        }
+        addLog(successMsg, 'Success');
+      })
+      .withFailureHandler((error) => {
+        toggleLoading(false);
+        addLog(`Error: ${error.message || error}`, 'Error');
+      })[functionName](payload);
+  }
+
+  // --- Card Handlers ---
+  function handleLocalFile() {
+    const fileInput = document.getElementById('svgFileInput');
+    if (!fileInput.files.length) {
+      addLog('No file selected.', 'Error');
+      return;
+    }
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+      const content = e.target.result.split(',')[1];
+      const args = {
+        bytes: content,
+        filename: file.name,
+        mimeType: file.type
+      };
+      
+      executeGAS('processLocalFile', args, `Base64 processed ${file.name}`);
+    };
+    
+    addLog(`Reading file ${file.name}...`, 'Info');
+    reader.readAsDataURL(file);
+  }
+
+  function handleCommandFetch() {
+    const version = document.getElementById('versionInput').value;
+    const platform = document.getElementById('platformSelect').value;
+    if (!version) {
+      addLog('Please enter a version number.', 'Error');
+      return;
+    }
+    executeGAS('fetchFromCommand', {version, platform}, `Fetch command sent for version ${version}`);
+  }
+
+  function handleTicketSync() {
+    const key = document.getElementById('ticketInput').value;
+    if (!key) {
+      addLog('Please enter a Ticket Key.', 'Error');
+      return;
+    }
+    executeGAS('fetchByTicket', {key}, `Fetched map task initialized for ${key}`);
+  }
+
+  function handleToggleAuto(event) {
+    const state = event.target.checked;
+    executeGAS('toggleAutoAudit', {state}, `Triggering audit state ${state}`);
+  }
+
+  function clearConsole() {
+    const consoleDiv = document.getElementById('status-console');
+    consoleDiv.innerHTML = '';
+    addLog('Ready. Console initialized.', 'System');
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    addLog('Ready. Console successfully initialized and awaiting requests.', 'System');
+    checkCredentialsState();
+    
+    // Binding Buttons
+    document.getElementById('validateLocalBtn').addEventListener('click', handleLocalFile);
+    document.getElementById('fetchCommandBtn').addEventListener('click', handleCommandFetch);
+    document.getElementById('fetchTicketBtn').addEventListener('click', handleTicketSync);
+    document.getElementById('autoToggle').addEventListener('change', handleToggleAuto);
+    document.getElementById('clearConsoleBtn').addEventListener('click', clearConsole);
+    
+    // Binding Modals
+    // Null safety if HTML hasn't updated yet or if element is removed
+    const btnOpenSet = document.getElementById('openSettingsBtn');
+    if (btnOpenSet) btnOpenSet.addEventListener('click', openSettings);
+    
+    const btnCloseSet = document.getElementById('closeSettingsBtn');
+    if (btnCloseSet) btnCloseSet.addEventListener('click', closeSettings);
+    
+    const btnSaveSet = document.getElementById('saveSettingsBtn');
+    if (btnSaveSet) btnSaveSet.addEventListener('click', saveSettings);
+    
+    const btnCloseFind = document.getElementById('closeFindingsBtn');
+    if (btnCloseFind) btnCloseFind.addEventListener('click', closeFindings);
+  });
+</script>
